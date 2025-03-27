@@ -1,41 +1,37 @@
-import React, { useState, useContext } from 'react';
-import axios from 'axios';
-import { useNavigate } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
+import React, { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import axios from "axios";
 
 const Login = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const navigate = useNavigate();
-  const { login } = useContext(AuthContext);
 
-  // ✅ Define handleSubmit function before using it
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const response = await axios.post('http://10.178.20.124:5000/api/auth/login', {
+      const res = await axios.post("http://10.178.20.123:5000/api/auth/login", {
         email,
         password,
       });
-      login(response.data.token);
-      navigate('/dashboard');
+      localStorage.setItem("token", res.data.token);
+      navigate("/dashboard");
     } catch (err) {
-      setError('Invalid email or password');
+      alert("Invalid credentials");
     }
   };
 
   return (
-    <div>
+    <div style={{ textAlign: "center", marginTop: "100px" }}>
       <h2>Login</h2>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      <form onSubmit={handleSubmit}> {/* ✅ This line calls handleSubmit */}
+      <form onSubmit={handleLogin}>
         <input
           type="email"
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
+          style={{ display: "block", margin: "10px auto", padding: "8px" }}
         />
         <input
           type="password"
@@ -43,12 +39,15 @@ const Login = () => {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
+          style={{ display: "block", margin: "10px auto", padding: "8px" }}
         />
-        <button type="submit">Login</button>
+        <button type="submit" style={{ marginTop: "10px", padding: "8px 16px" }}>
+          Login
+        </button>
       </form>
-      <p>
-  Don’t have an account? <a href="/register">Register here</a>
-</p>
+      <p style={{ marginTop: "20px" }}>
+        Don’t have an account? <Link to="/register">Register here</Link>
+      </p>
     </div>
   );
 };

@@ -9,7 +9,7 @@ const api = axios.create({
 
 export const getSiteData = async (siteName) => {
   try {
-    const response = await api.get('/sites/${siteName}');
+    const response = await api.get(`/sites/${siteName}`);
     return response.data;
   } catch (error) {
     console.error('Error fetching site data:', error);
@@ -19,7 +19,7 @@ export const getSiteData = async (siteName) => {
 
 export const getDeviceDetails = async (siteName) => {
   try {
-    const response = await api.get('/devices/${siteName}');
+    const response = await api.get(`/devices/${siteName}`);
     return response.data;
   } catch (error) {
     console.error('Error fetching device details:', error);
@@ -29,7 +29,7 @@ export const getDeviceDetails = async (siteName) => {
 
 export const getSiteLogs = async (siteName) => {
   try {
-    const response = await api.get('/logs/${siteName}');
+    const response = await api.get(`/logs/${siteName}`);
     return response.data;
   } catch (error) {
     console.error('Error fetching site logs:', error);
@@ -39,7 +39,7 @@ export const getSiteLogs = async (siteName) => {
 
 export const getSiteAlerts = async (siteName) => {
   try {
-    const response = await api.get('/alerts/${siteName}');
+    const response = await api.get(`/alerts/${siteName}`);
     return response.data;
   } catch (error) {
     console.error('Error fetching site alerts:', error);
@@ -52,7 +52,7 @@ export const registerUser = async (userData) => {
     const response = await api.post('/auth/register', userData);
     return response.data;
   } catch (error) {
-    console.error('Error registering user:', error);
+    console.error('Error registering user:', error.response?.data || error);
     throw error;
   }
 };
@@ -62,7 +62,7 @@ export const loginUser = async (userData) => {
     const response = await api.post('/auth/login', userData);
     return response.data;
   } catch (error) {
-    console.error('Error logging in:', error);
+    console.error('Error logging in:', error.response?.data || error);
     throw error;
   }
 };

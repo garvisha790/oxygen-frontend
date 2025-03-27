@@ -1,44 +1,32 @@
-import React, { useState } from 'react';
-import axios from 'axios';
-import { useNavigate } from 'react-router-dom';
+import React, { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import axios from "axios";
 
 const Register = () => {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const navigate = useNavigate();
 
   const handleRegister = async (e) => {
     e.preventDefault();
-    console.log('Sending:', { name, email, password });
-  
     try {
-      const response = await axios.post(
-        'http://localhost:5000/api/auth/register',
-        { name, email, password },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-  
-      console.log('Response:', response.data);
-      alert('Registered Successfully! Please login.');
-      navigate('/');
+      await axios.post("http://10.178.20.123:5000/api/auth/register", {
+        name,
+        email,
+        password,
+      });
+      alert("Registration successful! You can now log in.");
+      navigate("/");
     } catch (err) {
-      console.error('Error response:', err.response?.data);
-      setError(err.response?.data?.message || 'Registration failed.');
+      alert("Registration failed. Try again.");
+      console.error(err);
     }
   };
-  
-  
 
   return (
-    <div>
+    <div style={{ textAlign: "center", marginTop: "100px" }}>
       <h2>Register</h2>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
       <form onSubmit={handleRegister}>
         <input
           type="text"
@@ -46,6 +34,7 @@ const Register = () => {
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
+          style={{ display: "block", margin: "10px auto", padding: "8px" }}
         />
         <input
           type="email"
@@ -53,6 +42,7 @@ const Register = () => {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
+          style={{ display: "block", margin: "10px auto", padding: "8px" }}
         />
         <input
           type="password"
@@ -60,9 +50,15 @@ const Register = () => {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
+          style={{ display: "block", margin: "10px auto", padding: "8px" }}
         />
-        <button type="submit">Register</button>
+        <button type="submit" style={{ marginTop: "10px", padding: "8px 16px" }}>
+          Register
+        </button>
       </form>
+      <p style={{ marginTop: "20px" }}>
+        Already have an account? <Link to="/">Login here</Link>
+      </p>
     </div>
   );
 };

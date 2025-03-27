@@ -1,14 +1,16 @@
 import React, { useContext } from "react";
-import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
+import { BrowserRouter as Router, Route, Routes, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
-import Dashboard from "./pages/Dashboard";
-import SiteDashboard from "./pages/SiteDashboard";
-import { AuthContext, AuthProvider } from "./context/AuthContext"; // <-- FIXED
+import MainDashboard from "./pages/MainDashboard";
+import PlantDashboard from "./pages/PlantDashboard";
+import DeviceDashboard from "./pages/DeviceDashboard";  
+import TelemetryDashboard from "./pages/TelemetryDashboard";  // ✅ Import Telemetry Dashboard
+import { AuthContext, AuthProvider } from "./context/AuthContext";
 
 const PrivateRoute = ({ children }) => {
   const { isAuthenticated } = useContext(AuthContext);
-  return isAuthenticated ? children : <Login />;
+  return isAuthenticated ? children : <Navigate to="/" />;
 };
 
 function App() {
@@ -18,20 +20,35 @@ function App() {
         <Routes>
           <Route path="/" element={<Login />} />
           <Route path="/register" element={<Register />} />
-
           <Route
             path="/dashboard"
             element={
               <PrivateRoute>
-                <Dashboard />
+                <MainDashboard />
               </PrivateRoute>
             }
           />
           <Route
-            path="/site/:hospitalName"
+            path="/plant-dashboard"
             element={
               <PrivateRoute>
-                <SiteDashboard />
+                <PlantDashboard />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/device-dashboard"
+            element={
+              <PrivateRoute>
+                <DeviceDashboard />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/telemetry-dashboard"   // ✅ Telemetry Dashboard Route added
+            element={
+              <PrivateRoute>
+                <TelemetryDashboard />
               </PrivateRoute>
             }
           />
