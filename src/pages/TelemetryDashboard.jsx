@@ -1,7 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { getPlants } from "../services/plantService";
 import { getDevices } from "../services/deviceService";
-import { getTelemetryByDevice } from "../services/telemetryService";
+import { 
+  getLatestTelemetryEntry, 
+  getRealtimeTelemetryData, 
+  getTelemetryData,
+  clearDeviceCache 
+} from "../services/telemetryService";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -12,9 +17,19 @@ import {
   Title,
   Tooltip,
   Legend,
+  ArcElement,
 } from "chart.js";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
+ChartJS.register(
+  CategoryScale, 
+  LinearScale, 
+  PointElement, 
+  LineElement, 
+  Title, 
+  Tooltip, 
+  Legend,
+  ArcElement
+);
 
 import {
   Container,
@@ -31,33 +46,108 @@ import {
   Box,
   Typography,
   CircularProgress,
+  Button,
+  Grid,
+  Divider,
+  TableContainer,
 } from "@mui/material";
 
 import Sidebar from "../components/Sidebar";
+import { useTheme } from '@mui/material/styles';
+
+// Custom circular progress visualization component that matches the reference UI
+const MetricCircle = ({ value, label, color, size = 100, thickness = 5 }) => {
+  const theme = useTheme();
+  const displayValue = value || 0;
+  
+  return (
+    <Box sx={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      alignItems: 'center',
+      m: 2
+    }}>
+      <Box sx={{ 
+        position: 'relative', 
+        display: 'inline-flex',
+        mb: 1
+      }}>
+        <CircularProgress
+          variant="determinate"
+          value={75} // Fixed angle for the visual style
+          size={size}
+          thickness={thickness}
+          sx={{ 
+            color: color || theme.palette.primary.main,
+            transform: 'rotate(135deg)',
+            '& .MuiCircularProgress-circle': {
+              strokeLinecap: 'round',
+            }
+          }}
+        />
+        <Box
+          sx={{
+            top: 0,
+            left: 0,
+            bottom: 0,
+            right: 0,
+            position: 'absolute',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Typography variant="h5" component="div" fontWeight="bold">
+            {displayValue}
+            {label === 'Temperature' ? '°C' : label === 'Humidity' || label === 'Oil Level' ? '%' : ''}
+          </Typography>
+        </Box>
+      </Box>
+      <Typography variant="body1" component="div">
+        {label}
+      </Typography>
+    </Box>
+  );
+};
 
 const TelemetryDashboard = () => {
+  const theme = useTheme();
   const [plants, setPlants] = useState([]);
   const [devices, setDevices] = useState([]);
   const [selectedPlant, setSelectedPlant] = useState("");
-  const [selectedDevice, setSelectedDevice] = useState("");
+  const [selectedDevice, setSelectedDevice] = useState("esp32");
   const [telemetryData, setTelemetryData] = useState([]);
+  const [latestEntry, setLatestEntry] = useState(null);
+  const [realtimeData, setRealtimeData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState("status");
+  const [connectionStatus, setConnectionStatus] = useState("disconnected");
 
-  // Fetch plants when component mounts
+  // Fetch plants on component mount
   useEffect(() => {
     const fetchPlants = async () => {
       try {
+        setLoading(true);
         const plantData = await getPlants();
-        setPlants(plantData);
+        if (plantData && plantData.length > 0) {
+          setPlants(plantData);
+          // Auto-select first plant if none selected
+          if (!selectedPlant && plantData.length > 0) {
+            setSelectedPlant(plantData[0]._id);
+          }
+        }
       } catch (error) {
         console.error("❌ Error fetching plants:", error);
+        setError("Failed to load plants. Please try again.");
+      } finally {
+        setLoading(false);
       }
     };
     fetchPlants();
-  }, []);
+  }, [selectedPlant]);
 
-  // Fetch devices when plant is selected
+  // Fetch devices when plant selection changes
   useEffect(() => {
     const fetchDevices = async () => {
       if (!selectedPlant) {
@@ -65,145 +155,527 @@ const TelemetryDashboard = () => {
         setSelectedDevice("");
         return;
       }
+      
       try {
+        setLoading(true);
         const deviceData = await getDevices(selectedPlant);
-        setDevices(deviceData);
+        if (deviceData && deviceData.length > 0) {
+          setDevices(deviceData);
+          // Auto-select first device if none selected
+          if (!selectedDevice && deviceData.length > 0) {
+            setSelectedDevice(deviceData[0]._id);
+          }
+        } else {
+          setDevices([]);
+          setSelectedDevice("");
+        }
       } catch (error) {
         console.error("❌ Error fetching devices:", error);
-      }
-    };
-    fetchDevices();
-  }, [selectedPlant]);
-
-  // Fetch telemetry data when device is selected
-  useEffect(() => {
-    let interval;
-   
-    const fetchTelemetry = async () => {
-      if (!selectedDevice) {
-        setTelemetryData([]);
-        return;
-      }
-      setLoading(true);
-      setError(null);
-     
-      try {
-        const telemetry = await getTelemetryByDevice(selectedDevice);
-        setTelemetryData(telemetry);
-      } catch (error) {
-        console.error("❌ Error fetching telemetry data:", error);
-        setError("Failed to fetch telemetry data.");
+        setError("Failed to load devices. Please try again.");
       } finally {
         setLoading(false);
       }
     };
+    
+    fetchDevices();
+  }, [selectedPlant]);
 
-    fetchTelemetry();
-    interval = setInterval(fetchTelemetry, 10000); // Fetch every 10 seconds
-   
-    return () => clearInterval(interval); // Cleanup on unmount
+  // Fetch latest telemetry entry for dashboard metrics
+  const fetchLatestEntry = useCallback(async () => {
+    if (!selectedDevice) {
+      setLatestEntry(null);
+      setConnectionStatus("disconnected");
+      return;
+    }
+    
+    try {
+      const data = await getLatestTelemetryEntry(selectedDevice);
+      if (data) {
+        setLatestEntry(data);
+        setConnectionStatus("connected");
+        setError(null);
+      } else {
+        setConnectionStatus("no data");
+        setError("No telemetry data available for this device. Please check connection.");
+      }
+    } catch (error) {
+      console.error("❌ Error fetching latest telemetry:", error);
+      setConnectionStatus("error");
+      setError("Failed to fetch telemetry data. Please try again.");
+    }
   }, [selectedDevice]);
 
-  const chartData = {
-    labels: telemetryData.map((data) => new Date(data.timestamp).toLocaleTimeString()),
+  // Fetch realtime telemetry data for charts
+  const fetchRealtimeData = useCallback(async () => {
+    if (!selectedDevice) {
+      setRealtimeData([]);
+      return;
+    }
+    
+    try {
+      const data = await getRealtimeTelemetryData(selectedDevice);
+      if (data && data.length > 0) {
+        setRealtimeData(data);
+        setError(null);
+      }
+    } catch (error) {
+      console.error("❌ Error fetching realtime data:", error);
+    }
+  }, [selectedDevice]);
+
+  // Fetch historical telemetry data for tables
+  const fetchHistoricalData = useCallback(async () => {
+    if (!selectedDevice) {
+      setTelemetryData([]);
+      return;
+    }
+    
+    try {
+      const data = await getTelemetryData(selectedDevice);
+      if (data && data.length > 0) {
+        setTelemetryData(data.slice(-20)); // Last 20 entries
+        setError(null);
+      }
+    } catch (error) {
+      console.error("❌ Error fetching historical data:", error);
+    }
+  }, [selectedDevice]);
+
+  // Set up polling intervals when device changes
+  useEffect(() => {
+    if (!selectedDevice) return;
+    
+    // Clear cache when switching devices
+    clearDeviceCache(selectedDevice);
+    
+    // Initial fetches
+    fetchLatestEntry();
+    fetchRealtimeData();
+    fetchHistoricalData();
+    
+    // Set up polling intervals
+    const latestInterval = setInterval(fetchLatestEntry, 2000);
+    const realtimeInterval = setInterval(fetchRealtimeData, 3000);
+    const historicalInterval = setInterval(fetchHistoricalData, 10000);
+    
+    // Cleanup intervals on unmount or device change
+    return () => {
+      clearInterval(latestInterval);
+      clearInterval(realtimeInterval);
+      clearInterval(historicalInterval);
+    };
+  }, [selectedDevice, fetchLatestEntry, fetchRealtimeData, fetchHistoricalData]);
+
+  // Format data for temperature chart
+  const temperatureChartData = {
+    labels: realtimeData.map((data) => 
+      new Date(data.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+    ),
     datasets: [
       {
         label: "Temperature (°C)",
-        data: telemetryData.map((data) => data.temperature),
-        borderColor: "red",
-        backgroundColor: "rgba(255, 99, 132, 0.2)",
-      },
-      {
-        label: "Oil Level (%)",
-        data: telemetryData.map((data) => data.oilLevel),
-        borderColor: "blue",
-        backgroundColor: "rgba(54, 162, 235, 0.2)",
+        data: realtimeData.map((data) => data.temperature),
+        borderColor: "#ff6b8b",
+        backgroundColor: "rgba(255, 107, 139, 0.1)",
+        borderWidth: 2,
+        pointRadius: 2,
+        tension: 0.3,
+        fill: false,
       },
     ],
   };
 
-  return (
-    <Box sx={{ display: "flex" }}>
-      {/* Sidebar */}
-      <Sidebar />
+  // Format data for oil level chart
+  const oilLevelChartData = {
+    labels: realtimeData.map((data) => 
+      new Date(data.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+    ),
+    datasets: [
+      {
+        label: "Oil Level (%)",
+        data: realtimeData.map((data) => data.oilLevel),
+        borderColor: "#4dabf5",
+        backgroundColor: "rgba(77, 171, 245, 0.1)",
+        borderWidth: 2,
+        pointRadius: 2,
+        tension: 0.3,
+        fill: false,
+      },
+    ],
+  };
 
-      {/* Main Content */}
-      <Container maxWidth="lg" sx={{ mt: 4, ml: 4 }}>
-        <Typography variant="h4" fontWeight="bold" mb={3}>
-          Telemetry Dashboard
-        </Typography>
+  // Chart options for better appearance to match reference UI
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'top',
+        labels: {
+          boxWidth: 10,
+          usePointStyle: true,
+          pointStyle: 'rect'
+        }
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: false,
+        grid: {
+          display: true,
+          color: 'rgba(200, 200, 200, 0.1)',
+        },
+        ticks: {
+          font: {
+            size: 10
+          }
+        }
+      },
+      x: {
+        grid: {
+          display: false,
+        },
+        ticks: {
+          maxRotation: 45,
+          minRotation: 45,
+          font: {
+            size: 10
+          }
+        }
+      },
+    },
+    animation: {
+      duration: 500,
+    },
+  };
 
-        {/* Plant Selection */}
-        <FormControl fullWidth sx={{ mb: 2 }}>
-          <InputLabel>Select Plant</InputLabel>
-          <Select value={selectedPlant} onChange={(e) => setSelectedPlant(e.target.value)}>
-            <MenuItem value="">Select Plant</MenuItem>
-            {plants.map((plant) => (
-              <MenuItem key={plant._id} value={plant._id}>
-                {plant.plantName}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+  // Handlers for select changes
+  const handlePlantChange = (e) => {
+    const newPlantId = e.target.value;
+    setSelectedPlant(newPlantId);
+    setSelectedDevice("");
+    clearDeviceCache(); // Clear all device cache when plant changes
+  };
 
-        {/* Device Selection */}
-        <FormControl fullWidth sx={{ mb: 2 }} disabled={!selectedPlant}>
-          <InputLabel>Select Device</InputLabel>
-          <Select value={selectedDevice} onChange={(e) => setSelectedDevice(e.target.value)}>
-            <MenuItem value="">Select Device</MenuItem>
-            {devices.map((device) => (
-              <MenuItem key={device._id} value={device._id}>
-                {device.deviceName}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+  const handleDeviceChange = (e) => {
+    const newDeviceId = e.target.value;
+    setSelectedDevice(newDeviceId);
+    clearDeviceCache(newDeviceId); // Clear cache for this specific device
+  };
 
-        {/* Loading Indicator */}
-        {loading && <CircularProgress sx={{ display: "block", margin: "auto", my: 2 }} />}
+  // Render connection status indicator
+  const getConnectionStatus = () => {
+    if (connectionStatus === "connected") {
+      return "Connected";
+    } else if (connectionStatus === "disconnected") {
+      return "Disconnected";
+    } else if (connectionStatus === "error") {
+      return "Connection Error";
+    } else if (connectionStatus === "no data") {
+      return "No data available";
+    }
+    return "Unknown";
+  };
 
-        {/* Error Message */}
-        {error && <Typography color="error">{error}</Typography>}
-
-        {/* Line Chart */}
-        {telemetryData.length > 0 && !loading && (
-          <Paper sx={{ padding: "16px", marginBottom: "20px" }}>
-            <Typography variant="h6" mb={2}>
-              Temperature & Oil Level Over Time
-            </Typography>
-            <Line data={chartData} />
-          </Paper>
+  // Render the alarms tab content
+  const renderAlarmsTab = () => {
+    return (
+      <Box sx={{ textAlign: 'center', py: 2 }}>
+        {latestEntry ? (
+          <Typography variant="h6">
+            {latestEntry.openAlerts || 0} Open Alerts
+          </Typography>
+        ) : (
+          <Typography variant="body1" color="text.secondary">
+            No alerts data available
+          </Typography>
         )}
+      </Box>
+    );
+  };
 
-        {/* Telemetry Data Table */}
-        {telemetryData.length > 0 && !loading && (
-          <Paper sx={{ padding: "16px", marginTop: "20px" }}>
-            <Typography variant="h6">Telemetry Data</Typography>
-            <Table>
+  // Render the command center tab content
+  const renderCommandCenterTab = () => {
+    return (
+      <Box sx={{ textAlign: 'center', py: 2 }}>
+        <Typography variant="body1" color="text.secondary">
+          Command Center functionality coming soon
+        </Typography>
+      </Box>
+    );
+  };
+
+  // Render device metrics in the status tab
+  const renderDeviceMetrics = () => {
+    if (!latestEntry) {
+      return (
+        <Box sx={{ textAlign: 'center', py: 3 }}>
+          <Typography variant="body1" color="text.secondary">
+            No telemetry data available for this device. Please check connection.
+          </Typography>
+        </Box>
+      );
+    }
+
+    return (
+      <Box sx={{ mt: 3 }}>
+        <Typography variant="h6" fontWeight="bold" mb={2}>
+          Device Metrics
+        </Typography>
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-around', 
+          flexWrap: 'wrap',
+          mb: 3 
+        }}>
+          <MetricCircle 
+            value={latestEntry.openAlerts || 0} 
+            label="Open Alerts" 
+            color="#f44336" // red
+          />
+          <MetricCircle 
+            value={latestEntry.temperature || 0} 
+            label="Temperature" 
+            color="#ff9800" // orange
+          />
+          <MetricCircle 
+            value={latestEntry.humidity || 0} 
+            label="Humidity" 
+            color="#2196f3" // blue
+          />
+          <MetricCircle 
+            value={latestEntry.oilLevel || 0} 
+            label="Oil Level" 
+            color="#4caf50" // green
+          />
+        </Box>
+      </Box>
+    );
+  };
+
+  // Render charts section
+  const renderCharts = () => {
+    if (realtimeData.length === 0) return null;
+
+    return (
+      <>
+        <Grid container spacing={3} sx={{ mt: 2 }}>
+          <Grid item xs={12} md={6}>
+            <Typography variant="h6" mb={1}>Temperature Over Time</Typography>
+            <Paper sx={{ p: 2, height: 250 }}>
+              <Line data={temperatureChartData} options={chartOptions} />
+            </Paper>
+          </Grid>
+          
+          <Grid item xs={12} md={6}>
+            <Typography variant="h6" mb={1}>Oil Level Over Time</Typography>
+            <Paper sx={{ p: 2, height: 250 }}>
+              <Line data={oilLevelChartData} options={chartOptions} />
+            </Paper>
+          </Grid>
+        </Grid>
+
+        <Box sx={{ mt: 4 }}>
+          <Typography variant="h6" mb={1}>Latest Readings</Typography>
+          <TableContainer component={Paper}>
+            <Table size="small">
               <TableHead>
-                <TableRow sx={{ backgroundColor: "#0d47a1" }}>
-                  <TableCell sx={{ color: "white", fontWeight: "bold" }}>Timestamp</TableCell>
-                  <TableCell sx={{ color: "white", fontWeight: "bold" }}>Temperature (°C)</TableCell>
-                  <TableCell sx={{ color: "white", fontWeight: "bold" }}>Oil Level (%)</TableCell>
+                <TableRow>
+                  <TableCell>Timestamp</TableCell>
+                  <TableCell>Temperature (°C)</TableCell>
+                  <TableCell>Oil Level (%)</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {telemetryData.map((data, index) => (
-                  <TableRow key={index}>
-                    <TableCell>{new Date(data.timestamp).toLocaleString()}</TableCell>
-                    <TableCell>{data.temperature}</TableCell>
-                    <TableCell>{data.oilLevel}</TableCell>
+                {telemetryData.length > 0 ? (
+                  telemetryData.map((item, index) => (
+                    <TableRow key={index}>
+                      <TableCell>
+                        {new Date(item.timestamp).toLocaleString([], {
+                          year: 'numeric',
+                          month: 'numeric',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit'
+                        })}
+                      </TableCell>
+                      <TableCell>{item.temperature}</TableCell>
+                      <TableCell>{item.oilLevel}</TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={3} align="center">
+                      No data available
+                    </TableCell>
                   </TableRow>
-                ))}
+                )}
               </TableBody>
             </Table>
-          </Paper>
+          </TableContainer>
+        </Box>
+      </>
+    );
+  };
+
+  return (
+    <Box sx={{ display: "flex" }}>
+      <Sidebar />
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4, ml: 4 }}>
+        <Typography variant="h4" fontWeight="bold" mb={3}>
+          Telemetry Dashboard
+        </Typography>
+        
+        {/* Plant and Device Selection */}
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel id="plant-select-label">Select Plant</InputLabel>
+              <Select
+                labelId="plant-select-label"
+                value={selectedPlant}
+                onChange={handlePlantChange}
+                label="Select Plant"
+                disabled={loading}
+              >
+                {plants.map((plant) => (
+                  <MenuItem key={plant._id} value={plant._id}>
+                    {plant.plantName}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          
+          <Grid item xs={12} md={6}>
+            <FormControl fullWidth sx={{ mb: 2 }} disabled={!selectedPlant || loading}>
+              <InputLabel id="device-select-label">Select Device</InputLabel>
+              <Select
+                labelId="device-select-label"
+                value={selectedDevice}
+                onChange={handleDeviceChange}
+                label="Select Device"
+              >
+                {devices.map((device) => (
+                  <MenuItem key={device._id} value={device._id}>
+                    {device.deviceName}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+        </Grid>
+
+        {/* Loading indicator */}
+        {loading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+            <CircularProgress />
+          </Box>
         )}
 
-        {telemetryData.length === 0 && selectedDevice && !loading && !error && (
-          <Typography variant="body1" mt={2}>
-            No telemetry data available for this device.
-          </Typography>
+        {/* Tab navigation */}
+        {selectedDevice && !loading && (
+          <>
+            <Box 
+              sx={{ 
+                display: 'flex',
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 1,
+                overflow: 'hidden'
+              }}
+            >
+              <Button 
+                variant={activeTab === "status" ? "contained" : "text"}
+                onClick={() => setActiveTab("status")}
+                sx={{ 
+                  flex: 1, 
+                  py: 1.5,
+                  borderRadius: 0,
+                  color: activeTab === "status" ? "#fff" : "inherit",
+                  backgroundColor: activeTab === "status" ? "#1976d2" : "transparent"
+                }}
+              >
+                Status
+                {activeTab === "status" && (
+                  <Typography variant="caption" sx={{ ml: 1 }}>
+                    {getConnectionStatus()}
+                  </Typography>
+                )}
+              </Button>
+              
+              <Divider orientation="vertical" flexItem />
+              
+              <Button 
+                variant={activeTab === "alarms" ? "contained" : "text"}
+                onClick={() => setActiveTab("alarms")}
+                sx={{ 
+                  flex: 1, 
+                  py: 1.5,
+                  borderRadius: 0,
+                  color: activeTab === "alarms" ? "#fff" : "inherit",
+                  backgroundColor: activeTab === "alarms" ? "#1976d2" : "transparent"
+                }}
+              >
+                Alarms
+                {activeTab === "alarms" && latestEntry && (
+                  <Typography variant="caption" sx={{ ml: 1 }}>
+                    {latestEntry.openAlerts || 0} Open Alerts
+                  </Typography>
+                )}
+              </Button>
+              
+              <Divider orientation="vertical" flexItem />
+              
+              <Button 
+                variant={activeTab === "cmd" ? "contained" : "text"}
+                onClick={() => setActiveTab("cmd")}
+                sx={{ 
+                  flex: 1, 
+                  py: 1.5,
+                  borderRadius: 0,
+                  color: activeTab === "cmd" ? "#fff" : "inherit",
+                  backgroundColor: activeTab === "cmd" ? "#1976d2" : "transparent"
+                }}
+              >
+                Command Center
+              </Button>
+            </Box>
+
+            {/* Error message */}
+            {error && (
+              <Paper 
+                sx={{ 
+                  p: 2, 
+                  mt: 2, 
+                  bgcolor: 'error.light', 
+                  color: 'error.main',
+                  borderRadius: 1
+                }}
+              >
+                <Typography>{error}</Typography>
+              </Paper>
+            )}
+            
+            {/* Tab content */}
+            <Box sx={{ mt: 3 }}>
+              {activeTab === "status" && (
+                <>
+                  {renderDeviceMetrics()}
+                  {renderCharts()}
+                </>
+              )}
+              
+              {activeTab === "alarms" && renderAlarmsTab()}
+              
+              {activeTab === "cmd" && renderCommandCenterTab()}
+            </Box>
+          </>
         )}
       </Container>
     </Box>
