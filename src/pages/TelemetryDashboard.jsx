@@ -196,12 +196,12 @@ const TelemetryDashboard = () => {
         setError(null);
       } else {
         setConnectionStatus("no data");
-        setError("No telemetry data available for this device. Please check connection.");
+        setError("No telemetry data available for this device. Showing latest stored data if available.");
       }
     } catch (error) {
       console.error("❌ Error fetching latest telemetry:", error);
       setConnectionStatus("error");
-      setError("Failed to fetch telemetry data. Please try again.");
+      setError("Failed to fetch latest telemetry data. Showing latest stored data if available.");
     }
   }, [selectedDevice]);
 
@@ -213,13 +213,32 @@ const TelemetryDashboard = () => {
     }
     
     try {
+      setLoading(true);
       const data = await getRealtimeTelemetryData(selectedDevice);
+      setLoading(false);
+      
       if (data && data.length > 0) {
         setRealtimeData(data);
         setError(null);
+      } else {
+        // If no realtime data, try to use historical data
+        try {
+          const historicalData = await getTelemetryData(selectedDevice);
+          if (historicalData && historicalData.length > 0) {
+            setRealtimeData(historicalData.slice(0, 20));
+            setError("No real-time data available. Showing historical data instead.");
+          } else {
+            setError("No telemetry data available in CosmosDB for this device.");
+          }
+        } catch (innerError) {
+          console.error("❌ Error fetching historical data as fallback:", innerError);
+          setError("Failed to fetch any telemetry data from CosmosDB.");
+        }
       }
     } catch (error) {
+      setLoading(false);
       console.error("❌ Error fetching realtime data:", error);
+      setError("Failed to fetch real-time data from CosmosDB. Check connection settings.");
     }
   }, [selectedDevice]);
 
@@ -231,15 +250,29 @@ const TelemetryDashboard = () => {
     }
     
     try {
+      setLoading(true);
       const data = await getTelemetryData(selectedDevice);
+      setLoading(false);
+      
       if (data && data.length > 0) {
-        setTelemetryData(data.slice(-20)); // Last 20 entries
+        setTelemetryData(data.slice(0, 20)); // Last 20 entries
         setError(null);
+        
+        // If we have historical data but no latest entry, use the most recent historical entry
+        if (!latestEntry && data.length > 0) {
+          // Sort by timestamp, newest first
+          const sortedData = [...data].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+          setLatestEntry(sortedData[0]);
+        }
+      } else {
+        setError("No historical telemetry data available in CosmosDB for this device.");
       }
     } catch (error) {
+      setLoading(false);
       console.error("❌ Error fetching historical data:", error);
+      setError("Failed to fetch telemetry data from CosmosDB. Please check connection settings.");
     }
-  }, [selectedDevice]);
+  }, [selectedDevice, latestEntry]);
 
   // Set up polling intervals when device changes
   useEffect(() => {
@@ -415,7 +448,10 @@ const TelemetryDashboard = () => {
       return (
         <Box sx={{ textAlign: 'center', py: 3 }}>
           <Typography variant="body1" color="text.secondary">
-            No telemetry data available for this device. Please check connection.
+            No telemetry data available for this device. Please check CosmosDB connection.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            If this is a real device and data exists in CosmosDB, check that device IDs match between the frontend and database.
           </Typography>
         </Box>
       );
@@ -459,7 +495,18 @@ const TelemetryDashboard = () => {
 
   // Render charts section
   const renderCharts = () => {
-    if (realtimeData.length === 0) return null;
+    if (realtimeData.length === 0) {
+      return (
+        <Box sx={{ textAlign: 'center', py: 3, mt: 3 }}>
+          <Typography variant="body1" color="text.secondary">
+            No telemetry data available in CosmosDB to display charts.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Please ensure data is being properly stored in the CosmosDB container.
+          </Typography>
+        </Box>
+      );
+    }
 
     return (
       <>
@@ -577,7 +624,7 @@ const TelemetryDashboard = () => {
             <CircularProgress />
           </Box>
         )}
-
+        
         {/* Tab navigation */}
         {selectedDevice && !loading && (
           <>
